@@ -112,7 +112,7 @@ Thread::set_specific()
   - 由于 EThread 继承自 Thread，因此
     - 在 EThread 中调用 this_thread() 返回的是 EThread 对象
     - 但是返回值的类型仍然是 Thread *
-    - 为了提供争取的返回值类型，在 EThread 中又定义了 this_ethread() 方法
+    - 为了提供正确的返回值类型，在 EThread 中又定义了 this_ethread() 方法
 
 ```
   // 下面是 I_Thread.h 中的一段注释
@@ -136,7 +136,7 @@ Thread::set_specific()
   
   任何时候，只要你调用 this_thread() 你就可以得到一个指向运行当前代码的 Thread 实例的指针。
 
-  // 这句注释没有在代码中体现，可能由于代码的删减，现在已经没有了 -------------
+  // 这句注释描述的机制没有在代码中体现，可能由于代码的删减，现在已经没有了 ---------
   Additionally, the EThread class (derived from Thread)
   maintains its own independent key.
   另外，EThread 类 (继承自 Thread 类) 维护了一个独立属于它自己的 thread_key.
@@ -144,7 +144,7 @@ Thread::set_specific()
   
   所有 EventSystem 中创建的线程都使用这个(同一个) thread_key 注册。
   
-  // 这句注释没有在代码中体现，可能由于代码的删减，现在已经没有了 -------------
+  // 这句注释描述的机制没有在代码中体现，可能由于代码的删减，现在已经没有了 ---------
   If you happen to call 
   this_ethread() from inside a thread which is not an EThread, you will
   get a NULL value (since that thread will not be  registered with the
@@ -833,51 +833,78 @@ EThread::execute()
 //end for(;;)
 
 ```
-                                                                     +-------------+
-       +-------------------------------------------------------------o    Sleep    |
-       |                                         +-------+           +------^------+
-       |                                         |       |                  |
-       |                 +---------+  +----------V--+ +--o------------+     |
-       |                 |  START  |  |process_event| | Interval Event|     |
-       |                 +----o----+  +----------o--+ +--^------------+     |
-       |                      |                  #       %                  |
-       |                      |                  #       %                  |
-       |   ################   |                  #       %                  |
-       |   #              #   |                  #       %                  |
-+------V---o--+        +--V---V---V--+        +--V-------V--+        +------o------+
-|   External  |        |   External  |        |    Event    |        |    Flush    |
-|    Event    o-------->  EventQueue o-------->             o-------->             |
-|    Queue    |        |   (local)   |        |    Queue    |        |   Signals   |
-+------^------+        +--o---^---o--+        +--^---^---^--+        +------o------+
-       |                  #   %   #              #   %   #                  |
-       |                  #   %   ################   %   #                  |
-       |                  #   %                      %   #                  |
-       |                  #   %  +----------------+  %   #                  |
-       |                  #   %  |   Timed Event  <%%%   #                  |
-       |                  #   %  +--------o-------+      #                  |
-       |                  #   %           |              #                  |
-       |                  #   %  +--------V-------+      #                  |
-       |                  #   %  | process_event  |      #                  |
-       |                  #   %  +--------^-------+      #                  |
-       |                  #   %           |              #                  |
-       |                  #   %  +--------o-------+      #                  |
-       |                  #   %%%> Immediate Event<%%%   #                  |
-       |                  #      +--------^-------+  %   #                  |
-       |                  #                          %   #                  |
-       |                  #       ################   %   #                  |
-       |                  #       #              #   %   #                  |
-       |               +--V-------V--+        +--o---V---o--+        +------V------+
-       |               |   Negative  |        |   External  |        |   External  |
-       +---------------o             <--------o  EventQueue <--------o    Event    |
-                       |    Queue    |        |   (local)   |        |    Queue    |
-                       +-------------+        +----------^--+        +--o----------+
-                                                         #              #
-                                                         ################
+                                                                                     +-------------+
+       +-----------------------------------------------------------------------------o    Sleep    |
+       |                                                                             +------^------+
+       |                                                                                    |
+       |                     +---------+                                                    |
+       |                     |  START  |                                                    |
+       |                     +----o----+                                                    |
+       |                          |                                                         |
+       |                          |                                                         |
+       |                          |                                                         |
+       |                          |                                                         |
++------V------+            +------V---V--+                +--V-------V--+            +------o------+
+|   External  o------------>   External  o---------------->    Event    o------------>    Flush    |
+|    Event    |            |  EventQueue |                |             |            |             |
+|    Queue    o############>   (local)   o################>    Queue    |            |   Signals   |
++------^------+            +--^---o---^--+                +--^---^---^--+            +------o------+
+       |                      #   #   %                      %   #   %                      |
+       |                      #   #   %                      %   #   %                      |
+       |                      #   #   %                      %   #   %                      |
+       |                      #   #   %  +----------------+  %   #   %  +----------------+  |
+       |                      #   #   %  |   Timed Event  <%%%   #   %%%> Interval Event |  |
+       |                      #   #   %  +--------o-------+      #      +--------o-------+  |
+       |                      #   #   %           |              #               |          |
+       |  +----------------+  #   #   %  +--------V-------+      #      +--------V-------+  |
+       |  | process_event  O###   #   %  | process_event  |      #   ###o process_event  |  |
+       |  +--------^-------+      #   %  +--------^-------+      #   #  +----------------+  |
+       |           |              #   %           |              #   #                      |
+       |  +--------o-------+      #   %  +--------o-------+      #   #                      |
+       |  | Interval Event <%%%   #   %%%> Immediate Event<%%%   #   #                      |
+       |  +----------------+  %   #      +----------------+  %   #   #                      |
+       |                      %   #                          %   #   #                      |
+       |                      %   #                          %   #   #                      |
+       |                      %   #                          %   #   #                      |
+       |                   +--V---V------+                +--V---o---V--+            +------V------+
+       |                   |   Negative  <################o   External  <############o   External  |
+       +-------------------o             |                |  EventQueue |            |    Event    |
+                           |    Queue    <----------------o   (local)   <------------o    Queue    |
+                           +-------------+                +-------------+            +-------------+
 
 o--------->  execute route
 o#########>  event route
 <%%%%%%%%%>  call and return
 ```
+
+从上图中，我们可以看出，根据隐性队列是否为空，REGULAR EThread又被分为两种类型
+
+- 小循环：隐性队列为空
+  - 每次循环从外部队列的本地队列开始
+  - 然后是内部队列
+  - 然后 flush_signals()
+  - 最后阻塞，直到下一个定时事件 或 被 signal() 唤醒
+  - 唤醒后，把外部队列的原子队列导入到外部本地队列
+  - 开始下一个循环
+- 大循环：隐性队列非空
+  - 每次循环从外部队列的本地队列开始
+  - 然后是内部队列
+  - 然后 flush_signals()
+  - 把外部队列的原子队列导入到外部本地队列
+  - 再次处理外部队列的本地队列
+  - 然后是隐性队列
+  - 把外部队列的原子队列导入到外部本地队列
+  - 开始下一个循环
+
+在大循环里，第一次处理外部队列是为了内部队列，第二次处理外部队列是为了隐性队列，而且不会像小循环那样，在每一次循环的结束让EThread挂起。
+
+由于：
+
+  - 内部队列 和 隐性队列 都是 EThread 的私有成员
+  - 这两个队列里的事件都需要从外部队列传入
+
+为了能够及时处理最新的事件，每次在处理这两个队列之前都要首先检查一次外部队列，以确定能够及时的处理最新的事件。
+ 
 
 外部队列 & 本地队列
 
@@ -997,6 +1024,11 @@ void
 ProtectedQueue::enqueue(Event *e, bool fast_signal)
 {
   ink_assert(!e->in_the_prot_queue && !e->in_the_priority_queue);
+  // doEThread 为任务发起方所在线程，runEThread 为任务执行方所在线程，通过 Event 对象传递将任务描述（状态机）
+  // 通常由 doEThread 创建一个Event对象，但是该对象的成员 ethread 成员为 NULL，
+  // 然后，再通过eventProcessor.schedule_*()为该 Event 分配一个runEThread，然后调用此方法。
+  // 由于 doEThread 可能跟 RunEThread 在同一的线程池中，因此 doEThread 可能与 runEThread 相同。
+  // 所以，这里需要考虑 e->ethread 可能会等于 doEThread 的情况，而 doEThread 则为 this_ethread()。
   EThread *e_ethread = e->ethread;
   e->in_the_prot_queue = 1;
   // ink_atimiclist_push 执行原子操作将e压入到al的头部，返回值为压入之前的头部
@@ -1011,15 +1043,17 @@ ProtectedQueue::enqueue(Event *e, bool fast_signal)
     EThread *inserting_thread = this_ethread();
     // queue e->ethread in the list of threads to be signalled
     // inserting_thread == 0 means it is not a regular EThread
-    // 如果发起插入操作的EThread就是将要处理该event的EThread，简单说就是从线程内部插入
+    // 如果 doEThread 与 runEThread 为同一的 EThread 那么这里不需要进行特殊处理，
+    //     此时，发起插入操作的 EThread 就是将要处理该 Event 的 EThread，这叫做内部插入。
+    // 如果 doEThread 与 runEThread 不同，才需要进行下面的处理流程，
+    //     此时，发起插入操作的 EThread 不是将要处理该 Event 的 EThread，简单说就是从线程外部插入
+    //     这个event是由当前EThread(inserting_thread / doEThread)创建，要插入到另外一个EThread（e_ethread / runEThread）
+    //     调用本方法的方式必定是通过e_ethread->ExternalEventQueue.enqueue()的方式
     if (inserting_thread != e_ethread) {
-      // 如果发起插入操作的EThread不是将要处理该event的EThread，简单说就是从线程外部插入
-      //   这个event是由当前EThread(inserting_thread)创建，要插入到另外一个EThread（e_ethread）
-      //   调用本方法的方式必定是通过e_ethread->ExternalEventQueue.enqueue()的方式
+      // 如果发起插入操作的ethread不是REGULAR类型。
+      // 例如：DEDICATED类型（该类型的ethreads_to_be_signalled为NULL）
       if (!inserting_thread || !inserting_thread->ethreads_to_be_signalled) {
-        // 如果发起插入操作的ethread不是REGULAR类型，例如DEDICATED类型
-        //   或者是REGULAR类型，但是它的ethreads_to_be_signalled为空（就是不支持signal队列）
-        // 以上两种情况都需要以阻塞方式，向添加了新Event的ProtectQueue发出通知。
+        // 由于doEThread没有ethreads_to_be_signalled，无法实现延迟通知机制，只能采用阻塞方式向runEThread发出通知。
         // 发出通知后，阻塞在ProtectedQueue::dequeue_timed里的ink_cond_timedwait会立即返回。
         // 下面的signal就是直接通知e->ethread持有的xxxQueue
         signal();
@@ -1027,10 +1061,11 @@ ProtectedQueue::enqueue(Event *e, bool fast_signal)
           // 如果需要立即触发signal，那么尝试通知产生此Event的EThread
           if (e_ethread->signal_hook)
             // 调用产生event的EThread的signal_hook方法，实现异步通知
+            // 目前在 NetHandler 里通过signal_hook可以让 epoll_wait 的阻塞等待中断并返回
             e_ethread->signal_hook(e_ethread);
         }
       } else {
-        // 如果当前EThread是REGULAR类型，而且ethreads_to_be_signalled不为空（就是支持signal的队列化）
+      // 如果当前EThread是REGULAR类型，而且ethreads_to_be_signalled不为空（就是支持signal的队列化）
 #ifdef EAGER_SIGNALLING
         // 此处宏定义开关的含义：更及时的发送signal。（这样做好不好？见后面的分析）
         // 由于已经把event插入队列中，因此就要向持有此event的队列发送信号
@@ -1106,6 +1141,17 @@ ProtectedQueue::enqueue(Event *e, bool fast_signal)
    - 尝试获得锁，如果获得锁，就跟signal是一样的，然后返回1，表示成功执行signal操作
    - 如果没有获得锁，就返回0
 
+如果try_signal拿到了锁，成功发送了通知，则表示：
+
+- 当前没有处于epoll_wait()等特殊阻塞场景，
+- 不需要通过signal_hook()来向特殊组件发送通知。
+
+相反，则表示：
+
+- 目标EThread当前没有处于 cond_wait() 等待中
+- 目标EThread当前正在执行Event标记的任务，此时可能会有特殊组件产生的阻塞
+- 需要通过signal_hook()来打断特殊组件的阻塞
+
 相关代码如下：
 
 ```
@@ -1158,13 +1204,22 @@ flush_signals(EThread *thr)
     }
   }
 #endif
-  // 然后再使用signal，以阻塞方式完成剩余的signal操作。
+  // 然后再使用signal()，以阻塞方式完成剩余的signal操作。
+  // 如果一个EThread的Negative Queue为空，那么在没有事件需要执行的时候，
+  //     需要通过ProtectedQueue::timed_wait()让EThread挂起一段时间，
+  //     在此期间，如果需要该EThread立即处理一个Event，就可以通过signal()唤醒它
+  // 如果一个EThread的Negative Queue不为空，那么就存在需要随时执行的 Negative Event
+  //     此时，该EThread永远都不需要挂起，因为它一有机会就需要不断的执行 Negative Event 指定的任务
+  // 所以，
+  //     对于存在 Negative Event 的 EThread 通常只需要调用 signal_hook() 就可以了，
+  //     对于不存在 Negative Event 的 EThread 则需要同时考虑“在状态机中存在阻塞”或者“EThread被挂起”的情况。
+  // 例如：
+  //     NetHandler 是一个由 Negative Event 驱动的状态机，它调用 epoll_wait 时会存在一个阻塞的情况，
+  //     因此，NetHandler 注册了signal_hook 函数来实现中止 epoll_wait 的阻塞并返回到EventSystem的功能
   for (i = 0; i < n; i++) {
     if (thr->ethreads_to_be_signalled[i]) {
       thr->ethreads_to_be_signalled[i]->EventQueueExternal.signal();
-      // signel通知完成后，还要调用signal_hook
-      // 为什么try_signal()就不需要调用signal_hook呢？
-      if (thr->ethreads_to_be_signalled[i]->signal_hook)
+      if (thr->ethreads_to_be_signalled[i]->signal_hook)
         thr->ethreads_to_be_signalled[i]->signal_hook(thr->ethreads_to_be_signalled[i]);
       thr->ethreads_to_be_signalled[i] = 0;
     }   
@@ -1199,11 +1254,17 @@ flush_signals(EThread *thr)
 
 解释一下：
 
-  - 如果立即发起通知，就要从当前线程切换到目标线程来执行通知操作
-    - 这个通知操作是向目标线程所在的线程组中的所有线程发送通知（最多情况）
-    - 然后再回到当前线程继续运行，这样就导致了两次上下文切换。
-  - 目标线程在每一个EThread::execute()的循环中，都会触发一次发送通知的操作
-  - 如果可以等到目标线程自己触发通知操作，那么就不存在两次上下文切换了
+  - 如果需要为特定 Event 立即发起通知，则会立即唤醒目标线程
+    - 目标线程被唤醒后 CPU 需要加载它休眠之前的寄存器状态，由此导致上下文切入
+    - 处理完该指定 Event 之后，目标线程再次进入修庙，由此导致上下问切出
+    - 如果每处理一个 Event 都要切入、切出一次，那么上下文切换次数会非常的惊人
+  - 如果采用延迟通知，
+    - 在每一个EThread::execute()的循环中，
+      - 将需要通知的目标线程保存在当前线程的一个列表内
+      - 循环结束时，遍历该列表，一次性通知所有需要唤醒的线程
+    - 此时，在一个目标线程里可能存在多个 Event 需要运行
+    - 同样的一次上下文切入操作，则可以处理多个 Event 之后再切出
+    - 这样就减少了上下文切换的次数
 
 ## 参考资料
 
